@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app.models.schemas import (
@@ -7,6 +10,7 @@ from app.models.schemas import (
     SpeechAnalysisResponse,
     PhonemeScore,
 )
+from app.services import whisper, phoneme, feedback
 
 router = APIRouter()
 
@@ -55,18 +59,48 @@ async def evaluate_exercise(
     language: str = Form("es"),
 ):
     """Evaluate pronunciation for a specific exercise."""
-    # TODO: Look up exercise, run speech analysis pipeline
     exercise = next((e for e in STUB_EXERCISES if e.id == exercise_id), STUB_EXERCISES[0])
+
+    # Save uploaded audio to temp file
+    suffix = Path(audio.filename or "audio.webm").suffix or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        tmp_path = tmp.name
+
+    # Transcribe with Whisper
+    result = await whisper.transcribe(tmp_path, language)
+    transcript = result["text"]
+
+    # Convert exercise phrase to model phonemes and run GOP scoring
+    expected_phonemes = await phoneme.text_to_phonemes(exercise.phrase, language)
+    gop_results = await phoneme.compute_gop_scores(tmp_path, expected_phonemes)
+
+    phoneme_scores = [
+        PhonemeScore(
+            phoneme=r["phoneme"],
+            expected=r["expected"],
+            score=r["score"],
+            is_correct=r["is_correct"],
+        )
+        for r in gop_results
+    ]
+    overall_score = (
+        sum(r["score"] for r in gop_results) / len(gop_results)
+        if gop_results
+        else 0.0
+    )
+
+    feedback_lines = await feedback.generate_feedback(
+        exercise.phrase, transcript, gop_results, language
+    )
 
     return ExerciseEvalResponse(
         exercise=exercise,
         analysis=SpeechAnalysisResponse(
-            transcript=f"(stub) {exercise.phrase}",
+            transcript=transcript,
             expected_text=exercise.phrase,
-            phoneme_scores=[
-                PhonemeScore(phoneme="stub", expected="stub", score=0.9, is_correct=True),
-            ],
-            overall_score=0.88,
-            feedback=["(stub) Practice the rolling 'r' sound."],
+            phoneme_scores=phoneme_scores,
+            overall_score=round(overall_score, 3),
+            feedback=feedback_lines,
         ),
     )
