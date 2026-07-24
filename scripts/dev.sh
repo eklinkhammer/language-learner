@@ -14,6 +14,11 @@ trap cleanup EXIT
 
 echo "=== Starting Language Learner Dev Servers ==="
 
+# espeak-ng library for phonemizer (macOS Homebrew)
+if [ -f "/opt/homebrew/lib/libespeak-ng.dylib" ]; then
+    export PHONEMIZER_ESPEAK_LIBRARY="/opt/homebrew/lib/libespeak-ng.dylib"
+fi
+
 # Backend
 echo "Starting backend on http://localhost:8000 ..."
 cd "$ROOT_DIR/backend"

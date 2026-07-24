@@ -13,6 +13,7 @@ dependencies = [
     "epitran>=1.25",
     "panphon>=0.21",
     "pydantic-settings>=2.0",
+    "phonemizer>=3.3",
 ]
 
 [project.optional-dependencies]
