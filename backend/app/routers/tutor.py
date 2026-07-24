@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.models.schemas import ChatRequest, ChatResponse
+from app.services import llm
 
 router = APIRouter()
 
@@ -8,12 +9,12 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Conversational language tutor powered by claude -p."""
-    # TODO: Implement claude -p subprocess call via services/llm.py
+    result = await llm.chat(
+        message=request.message,
+        language=request.language,
+        history=[m.model_dump() for m in request.history],
+    )
     return ChatResponse(
-        reply=f"(stub) ¡Hola! I'm your {request.language} tutor. How can I help you practice today?",
-        suggestions=[
-            "¿Cómo estás?",
-            "Me llamo...",
-            "¿Dónde está...?",
-        ],
+        reply=result["reply"],
+        suggestions=result["suggestions"],
     )
