@@ -6,8 +6,11 @@ frames, and GOP (Goodness of Pronunciation) scoring.
 """
 
 import asyncio
+import logging
 import os
 import subprocess
+import tempfile
+import threading
 import wave
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +20,8 @@ import torch
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 # espeak-ng library path for phonemizer (macOS Homebrew)
 if not os.environ.get("PHONEMIZER_ESPEAK_LIBRARY"):
@@ -40,19 +45,31 @@ EPITRAN_LANG = {
 # GOP score threshold: above this = acceptable pronunciation
 GOP_THRESHOLD = 0.3
 
+# Thread-safe model loading
+_model_lock = threading.Lock()
+_model_cache: tuple | None = None
 
-@lru_cache(maxsize=1)
+
 def _load_model() -> tuple:
-    """Load and cache wav2vec2 phoneme model, processor, and vocab."""
-    processor = Wav2Vec2Processor.from_pretrained(settings.wav2vec2_model)
-    model = Wav2Vec2ForCTC.from_pretrained(settings.wav2vec2_model)
-    model.eval()
+    """Load and cache wav2vec2 phoneme model, processor, and vocab (thread-safe)."""
+    global _model_cache
+    if _model_cache is not None:
+        return _model_cache
+    with _model_lock:
+        if _model_cache is not None:
+            return _model_cache
+        log.info("Loading wav2vec2 model: %s", settings.wav2vec2_model)
+        processor = Wav2Vec2Processor.from_pretrained(settings.wav2vec2_model)
+        model = Wav2Vec2ForCTC.from_pretrained(settings.wav2vec2_model)
+        model.eval()
 
-    vocab = processor.tokenizer.get_vocab()
-    id_to_token = {v: k for k, v in vocab.items()}
-    blank_id = processor.tokenizer.pad_token_id
+        vocab = processor.tokenizer.get_vocab()
+        id_to_token = {v: k for k, v in vocab.items()}
+        blank_id = processor.tokenizer.pad_token_id
 
-    return processor, model, vocab, id_to_token, blank_id
+        log.info("Model loaded. Vocab size: %d, blank_id: %d", len(vocab), blank_id)
+        _model_cache = (processor, model, vocab, id_to_token, blank_id)
+        return _model_cache
 
 
 def _ensure_wav_16k(input_path: str) -> str:
@@ -66,12 +83,18 @@ def _ensure_wav_16k(input_path: str) -> str:
         except Exception:
             pass
 
-    wav_path = str(path.with_suffix("")) + "_phoneme.wav"
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", input_path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav_path],
-        capture_output=True,
-        check=True,
-    )
+    fd, wav_path = tempfile.mkstemp(suffix="_phoneme.wav")
+    os.close(fd)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", input_path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav_path],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        Path(wav_path).unlink(missing_ok=True)
+        raise RuntimeError(f"Audio conversion failed: {e}") from e
     return wav_path
 
 
@@ -91,16 +114,30 @@ def _get_log_probs(audio_path: str) -> tuple[torch.Tensor, float]:
     processor, model, _, _, _ = _load_model()
 
     wav_path = _ensure_wav_16k(audio_path)
-    audio = _load_wav(wav_path)
+    try:
+        audio = _load_wav(wav_path)
 
-    inputs = processor(audio, sampling_rate=16000, return_tensors="pt", padding=True)
-    with torch.no_grad():
-        logits = model(**inputs).logits
+        inputs = processor(audio, sampling_rate=16000, return_tensors="pt", padding=True)
+        del audio  # free numpy array
+        with torch.no_grad():
+            logits = model(**inputs).logits
+        del inputs  # free input tensors
 
-    log_probs = torch.log_softmax(logits, dim=-1)[0]  # (T, V)
-    frame_duration = len(audio) / 16000 / log_probs.shape[0]
+        log_probs = torch.log_softmax(logits, dim=-1)[0]  # (T, V)
+        del logits  # free logits
 
-    return log_probs, frame_duration
+        frame_duration = wav_path and 0  # recompute from audio length
+        # Recompute from the WAV file directly
+        with wave.open(wav_path, "rb") as wf:
+            n_samples = wf.getnframes()
+        frame_duration = n_samples / 16000 / log_probs.shape[0]
+
+        log.debug("Inference: %d samples -> %d frames", n_samples, log_probs.shape[0])
+
+        return log_probs, frame_duration
+    finally:
+        if wav_path != audio_path:
+            Path(wav_path).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +208,14 @@ def _ctc_forced_align(
     """
     T = log_probs.shape[0]
     S = len(target_ids)
-    if S == 0 or T == 0 or T < S:
-        return []
 
     # Expanded CTC target sequence
     L = 2 * S + 1
+
+    if S == 0 or T == 0 or T < L:
+        log.warning("Forced alignment skipped: T=%d, S=%d (need T >= %d)", T, S, L)
+        return []
+
     expanded = []
     for s in range(S):
         expanded.append(blank_id)
@@ -184,13 +224,17 @@ def _ctc_forced_align(
 
     NEG_INF = -1e9
 
+    # Pre-extract emission scores as numpy: (T, L) array
+    expanded_ids = np.array(expanded, dtype=np.int64)
+    emission = log_probs[:, expanded_ids].numpy()  # (T, L)
+
     # Viterbi DP
     alpha = np.full((T, L), NEG_INF, dtype=np.float64)
     backptr = np.zeros((T, L), dtype=np.int32)
 
-    alpha[0, 0] = log_probs[0, expanded[0]].item()
+    alpha[0, 0] = emission[0, 0]
     if L > 1:
-        alpha[0, 1] = log_probs[0, expanded[1]].item()
+        alpha[0, 1] = emission[0, 1]
 
     for t in range(1, T):
         for l_idx in range(L):
@@ -209,7 +253,7 @@ def _ctc_forced_align(
                     best = alpha[t - 1, l_idx - 2]
                     bp = l_idx - 2
 
-            alpha[t, l_idx] = best + log_probs[t, expanded[l_idx]].item()
+            alpha[t, l_idx] = best + emission[t, l_idx]
             backptr[t, l_idx] = bp
 
     # Backtrace from best final state (last blank or last token)
@@ -245,7 +289,7 @@ def _ctc_forced_align(
             scores = []
 
         if tok != blank_id:
-            scores.append(log_probs[t, tok].item())
+            scores.append(emission[t, state])
 
     # Emit final segment
     if cur_state >= 0 and expanded[cur_state] != blank_id:
@@ -276,16 +320,21 @@ def _find_vocab_id(phoneme: str, vocab: dict[str, int]) -> int | None:
     return None
 
 
+@lru_cache(maxsize=4)
+def _get_epitran(language: str):
+    """Cache epitran instances to avoid repeated initialization."""
+    import epitran
+    lang_code = EPITRAN_LANG.get(language, "spa-Latn")
+    return epitran.Epitran(lang_code)
+
+
 def _text_to_phonemes(text: str, language: str) -> list[str]:
     """Convert text to a list of phoneme tokens matching the model vocabulary.
 
     Uses epitran for grapheme-to-phoneme, then splits the IPA string into
     tokens that exist in the wav2vec2 vocabulary (greedy longest-match).
     """
-    import epitran
-
-    lang_code = EPITRAN_LANG.get(language, "spa-Latn")
-    epi = epitran.Epitran(lang_code)
+    epi = _get_epitran(language)
     ipa_str = epi.transliterate(text)
 
     _, _, vocab, _, _ = _load_model()
@@ -315,7 +364,7 @@ def _text_to_phonemes(text: str, language: str) -> list[str]:
 # Public async API
 # ---------------------------------------------------------------------------
 
-def _align_sync(audio_path: str, language: str) -> list[dict]:
+def _align_sync(audio_path: str) -> list[dict]:
     """Greedy CTC decode (synchronous)."""
     log_probs, fd = _get_log_probs(audio_path)
     _, _, _, id2tok, blank = _load_model()
@@ -335,6 +384,7 @@ def _gop_sync(audio_path: str, expected_phonemes: list[str]) -> list[dict]:
             targets.append((vid, p))
 
     if not targets:
+        log.warning("No phonemes could be mapped to model vocabulary")
         return []
 
     target_ids = [t[0] for t in targets]
@@ -372,13 +422,16 @@ def _gop_sync(audio_path: str, expected_phonemes: list[str]) -> list[dict]:
     return results
 
 
-async def align_phonemes(audio_path: str, transcript: str, language: str = "es") -> list[dict]:
+async def align_phonemes(audio_path: str, transcript: str = "", language: str = "es") -> list[dict]:
     """Run CTC greedy decode on audio — what phonemes does the model hear?
 
     Returns list of dicts with phoneme, start, end, confidence.
+
+    Note: transcript and language are accepted for API compatibility but not
+    used in greedy decoding.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _align_sync, audio_path, language)
+    return await loop.run_in_executor(None, _align_sync, audio_path)
 
 
 async def compute_gop_scores(
@@ -392,8 +445,7 @@ async def compute_gop_scores(
         audio_path: Path to audio file (any format — converted to WAV internally).
         expected_phonemes: Phoneme tokens in the model's vocabulary format.
             Use text_to_phonemes() to convert from text.
-        aligned_phonemes: Unused (kept for API compatibility). Forced alignment
-            is computed internally.
+        aligned_phonemes: Deprecated — ignored. Forced alignment is computed internally.
 
     Returns:
         List of dicts with phoneme (actual), expected, score, is_correct, start, end.
