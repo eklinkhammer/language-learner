@@ -47,7 +47,7 @@ frontend/dist/
 .env.*.local
 
 # ML Models
-models/
+/models/
 *.pt
 *.bin
 *.onnx

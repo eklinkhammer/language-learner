@@ -1,7 +1,14 @@
+import { useEffect, useMemo } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 
 interface Props {
   onRecordingComplete: (blob: Blob) => void;
+}
+
+function AudioPreview({ blob }: { blob: Blob }) {
+  const url = useMemo(() => URL.createObjectURL(blob), [blob]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return <audio src={url} controls />;
 }
 
 export function AudioRecorder({ onRecordingComplete }: Props) {
@@ -34,7 +41,7 @@ export function AudioRecorder({ onRecordingComplete }: Props) {
         )}
         {audioBlob && (
           <>
-            <audio src={URL.createObjectURL(audioBlob)} controls />
+            <AudioPreview blob={audioBlob} />
             <button onClick={handleSubmit}>Submit</button>
             <button onClick={clearRecording}>Discard</button>
           </>

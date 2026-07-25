@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     default_language: str = "es"
     upload_dir: str = "uploads"
     claude_command: str = "claude"
+    cors_origins: list[str] = ["http://localhost:5173"]
 
 
 settings = Settings()

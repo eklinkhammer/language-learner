@@ -10,11 +10,17 @@ export function ExerciseView() {
   const [analysis, setAnalysis] = useState<SpeechAnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    getExercises("es").then((res) => {
-      setExercises(res.exercises);
-      if (res.exercises.length > 0) setCurrent(res.exercises[0]);
-    });
+    getExercises("es")
+      .then((res) => {
+        setExercises(res.exercises);
+        if (res.exercises.length > 0) setCurrent(res.exercises[0]);
+      })
+      .catch(() => {
+        setError("Failed to load exercises. Is the backend running?");
+      });
   }, []);
 
   const handleRecording = async (blob: Blob) => {
@@ -34,6 +40,8 @@ export function ExerciseView() {
   return (
     <div className="exercise-view">
       <h2>Pronunciation Drills</h2>
+
+      {error && <p className="error">{error}</p>}
 
       <div className="exercise-list">
         {exercises.map((ex) => (

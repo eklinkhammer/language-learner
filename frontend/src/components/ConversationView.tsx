@@ -18,7 +18,7 @@ export function ConversationView() {
     setLoading(true);
 
     try {
-      const res = await chat(input, language, updated);
+      const res = await chat(input, language, messages);
       setMessages([...updated, { role: "assistant", content: res.reply }]);
     } catch {
       setMessages([
