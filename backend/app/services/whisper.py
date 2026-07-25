@@ -1,14 +1,15 @@
 """Whisper transcription service using MLX on Apple Silicon."""
 
 import asyncio
+import logging
 import subprocess
-import tempfile
-from functools import lru_cache
 from pathlib import Path
 
 import mlx_whisper
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 # Language code to Whisper language name mapping
 LANGUAGE_MAP = {
@@ -19,11 +20,8 @@ LANGUAGE_MAP = {
 }
 
 
-@lru_cache(maxsize=1)
-def _warm_model() -> str:
-    """Trigger model download/cache on first use. Returns the model path."""
-    # mlx_whisper downloads and caches the model automatically on first transcribe call.
-    # We just return the configured repo so callers don't need to know about config.
+def _get_model_repo() -> str:
+    """Return the configured Whisper model repo identifier."""
     return settings.whisper_model
 
 
@@ -34,44 +32,71 @@ def _convert_to_wav(input_path: str) -> str:
     produces webm/opus which needs conversion.
     """
     wav_path = input_path + ".wav"
-    subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-i", input_path,
-            "-ar", "16000",
-            "-ac", "1",
-            "-c:a", "pcm_s16le",
-            wav_path,
-        ],
-        capture_output=True,
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", input_path,
+                "-ar", "16000",
+                "-ac", "1",
+                "-c:a", "pcm_s16le",
+                wav_path,
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        log.error("ffmpeg timed out converting %s", input_path)
+        raise RuntimeError("Audio conversion timed out")
+    except subprocess.CalledProcessError as e:
+        log.error("ffmpeg failed: %s", e.stderr.decode(errors="replace"))
+        raise RuntimeError(f"Audio conversion failed: {e.stderr.decode(errors='replace')[:500]}")
     return wav_path
 
 
 def _transcribe_sync(audio_path: str, language: str) -> dict:
     """Synchronous transcription — runs in thread pool."""
-    model_repo = _warm_model()
-    lang = LANGUAGE_MAP.get(language, language)
+    model_repo = _get_model_repo()
 
-    # Convert to WAV if not already
+    lang = LANGUAGE_MAP.get(language)
+    if lang is None:
+        raise ValueError(
+            f"Unsupported language: {language!r}. "
+            f"Supported: {list(LANGUAGE_MAP.keys())}"
+        )
+
+    wav_path = None
+    # Convert to WAV if not already a supported format
     path = Path(audio_path)
-    if path.suffix not in (".wav", ".mp3", ".flac", ".m4a"):
-        audio_path = _convert_to_wav(audio_path)
+    if path.suffix.lower() not in (".wav", ".mp3", ".flac", ".m4a"):
+        wav_path = _convert_to_wav(audio_path)
+        audio_path = wav_path
 
-    result = mlx_whisper.transcribe(
-        audio_path,
-        path_or_hf_repo=model_repo,
-        language=lang,
-        word_timestamps=True,
-        verbose=False,
-    )
+    try:
+        result = mlx_whisper.transcribe(
+            audio_path,
+            path_or_hf_repo=model_repo,
+            language=lang,
+            word_timestamps=True,
+            verbose=False,
+        )
 
-    return {
-        "text": result["text"].strip(),
-        "segments": result.get("segments", []),
-        "language": result.get("language", lang),
-    }
+        log.info(
+            "Transcribed %s (%s): %d chars, %d segments",
+            audio_path, lang, len(result["text"]), len(result.get("segments", [])),
+        )
+
+        return {
+            "text": result["text"].strip(),
+            "segments": result.get("segments", []),
+            "language": result.get("language", lang),
+        }
+    finally:
+        if wav_path is not None:
+            Path(wav_path).unlink(missing_ok=True)
 
 
 async def transcribe(audio_path: str, language: str = "es") -> dict:
