@@ -6,19 +6,16 @@ tongue further forward").
 """
 
 import asyncio
+import logging
 from functools import lru_cache
 
 import epitran
 import panphon
 import panphon.distance
 
-# epitran language codes
-EPITRAN_LANG = {
-    "es": "spa-Latn",
-    "hr": "hrv-Latn",
-    "de": "deu-Latn",
-    "zh": "cmn-Hans",
-}
+from app.services.phoneme import EPITRAN_LANG
+
+log = logging.getLogger(__name__)
 
 # Human-readable names for articulatory features
 FEATURE_DESCRIPTIONS: dict[str, tuple[str, str]] = {
@@ -64,7 +61,12 @@ COMMON_TIPS: dict[tuple[str, str], str] = {
 
 @lru_cache(maxsize=4)
 def _get_epitran(language: str) -> epitran.Epitran:
-    lang_code = EPITRAN_LANG.get(language, "spa-Latn")
+    lang_code = EPITRAN_LANG.get(language)
+    if lang_code is None:
+        raise ValueError(
+            f"Unsupported language '{language}'. "
+            f"Supported: {', '.join(EPITRAN_LANG)}"
+        )
     return epitran.Epitran(lang_code)
 
 
@@ -97,6 +99,9 @@ def _describe_difference(expected: str, actual: str) -> str | None:
     diffs = []
     for i, name in enumerate(names):
         if vec_exp[i] != vec_act[i] and name in FEATURE_DESCRIPTIONS:
+            # Skip differences involving unspecified (0) features
+            if vec_exp[i] == 0 or vec_act[i] == 0:
+                continue
             # What the expected phoneme requires
             pos_desc, neg_desc = FEATURE_DESCRIPTIONS[name]
             needed = pos_desc if vec_exp[i] == 1 else neg_desc
@@ -167,22 +172,16 @@ def _generate_feedback_sync(
             silence_phonemes.append(expected_ph)
             continue
 
-        # Compute articulatory distance
-        dist_val = dist.feature_edit_distance(expected_ph, actual_ph)
-
         # Build feedback line
         line = f"  /{expected_ph}/ → you said /{actual_ph}/"
 
-        if dist_val == 0:
-            # Same phoneme in panphon's view (might differ in model vocab encoding)
+        # Get articulatory tip (uses panphon features internally)
+        tip = _describe_difference(expected_ph, actual_ph)
+        if tip is None:
+            # Same phoneme in panphon's view, or unknown segments
             line += " — very close, minor adjustment needed."
         else:
-            # Get articulatory tip
-            tip = _describe_difference(expected_ph, actual_ph)
-            if tip:
-                line += f" — {tip}"
-            else:
-                line += f" (articulatory distance: {dist_val:.2f})."
+            line += f" — {tip}"
 
         feedback.append(line)
 
@@ -193,11 +192,11 @@ def _generate_feedback_sync(
             f"  /{joined}/ — not detected. Try speaking more clearly or closer to the mic."
         )
 
-    # General tips based on common patterns
+    # General tips based on overall distance (normalized)
     expected_ipa = epi.transliterate(expected_text)
     transcript_ipa = epi.transliterate(transcript)
 
-    overall_dist = dist.feature_edit_distance(expected_ipa, transcript_ipa)
+    overall_dist = dist.feature_edit_distance_div_maxlen(expected_ipa, transcript_ipa)
     if overall_dist > 0.5:
         feedback.append("")
         feedback.append(
@@ -232,6 +231,10 @@ async def generate_feedback(
         List of feedback strings with actionable pronunciation tips.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _generate_feedback_sync, expected_text, transcript, phoneme_scores, language
-    )
+    try:
+        return await loop.run_in_executor(
+            None, _generate_feedback_sync, expected_text, transcript, phoneme_scores, language
+        )
+    except Exception:
+        log.exception("Feedback generation failed")
+        return ["(Pronunciation feedback is temporarily unavailable.)"]
