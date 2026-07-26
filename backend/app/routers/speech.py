@@ -79,7 +79,7 @@ async def analyze_speech(
         )
 
         # 4. Generate human-readable feedback with epitran/panphon
-        feedback_lines = await feedback.generate_feedback(
+        feedback_lines, feedback_items = await feedback.generate_feedback(
             expected_text, transcript, gop_results, language
         )
 
@@ -89,6 +89,7 @@ async def analyze_speech(
             phoneme_scores=phoneme_scores,
             overall_score=round(correct_fraction, 3),
             feedback=feedback_lines,
+            feedback_items=feedback_items,
         )
     except Exception:
         log.exception("Speech analysis pipeline failed")

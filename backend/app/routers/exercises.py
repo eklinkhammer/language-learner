@@ -119,7 +119,7 @@ async def evaluate_exercise(
             else 0.0
         )
 
-        feedback_lines = await feedback.generate_feedback(
+        feedback_lines, feedback_items = await feedback.generate_feedback(
             exercise.phrase, transcript, gop_results, language
         )
 
@@ -131,6 +131,7 @@ async def evaluate_exercise(
                 phoneme_scores=phoneme_scores,
                 overall_score=round(correct_fraction, 3),
                 feedback=feedback_lines,
+                feedback_items=feedback_items,
             ),
         )
     except HTTPException:

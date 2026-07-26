@@ -10,12 +10,30 @@ class PhonemeScore(BaseModel):
     is_correct: bool
 
 
+class PhonemeExampleRef(BaseModel):
+    phoneme: str
+    example_word: str
+    highlight: str
+    description: str
+    tts_url: str
+
+
+class FeedbackItem(BaseModel):
+    type: Literal["summary", "phoneme_error", "silence_error", "tip"]
+    message: str
+    expected_phoneme: str | None = None
+    actual_phoneme: str | None = None
+    expected_example: PhonemeExampleRef | None = None
+    actual_example: PhonemeExampleRef | None = None
+
+
 class SpeechAnalysisResponse(BaseModel):
     transcript: str
     expected_text: str
     phoneme_scores: list[PhonemeScore]
     overall_score: float
     feedback: list[str]
+    feedback_items: list[FeedbackItem] = []
 
 
 class ChatMessage(BaseModel):

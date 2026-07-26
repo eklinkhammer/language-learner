@@ -5,12 +5,30 @@ export interface PhonemeScore {
   is_correct: boolean;
 }
 
+export interface PhonemeExampleRef {
+  phoneme: string;
+  example_word: string;
+  highlight: string;
+  description: string;
+  tts_url: string;
+}
+
+export interface FeedbackItem {
+  type: "summary" | "phoneme_error" | "silence_error" | "tip";
+  message: string;
+  expected_phoneme?: string;
+  actual_phoneme?: string;
+  expected_example?: PhonemeExampleRef;
+  actual_example?: PhonemeExampleRef;
+}
+
 export interface SpeechAnalysisResponse {
   transcript: string;
   expected_text: string;
   phoneme_scores: PhonemeScore[];
   overall_score: number;
   feedback: string[];
+  feedback_items?: FeedbackItem[];
 }
 
 export interface ChatMessage {

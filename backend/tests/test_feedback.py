@@ -140,7 +140,7 @@ class TestGenerateFeedbackSync:
         mock_panphon.return_value = (mock_ft, mock_dist)
 
         func = self._get_patched_func()
-        result = func("test", "test", sample_gop_scores_all_correct, "es")
+        result, items = func("test", "test", sample_gop_scores_all_correct, "es")
         assert any("Excellent" in line for line in result)
 
     @patch("app.services.feedback._get_epitran")
@@ -155,7 +155,7 @@ class TestGenerateFeedbackSync:
         mock_panphon.return_value = (mock_ft, mock_dist)
 
         func = self._get_patched_func()
-        result = func("test", "test", [], "es")
+        result, items = func("test", "test", [], "es")
         assert any("No phonemes" in line for line in result)
 
     @patch("app.services.feedback._describe_difference")
@@ -183,7 +183,7 @@ class TestGenerateFeedbackSync:
         ]
 
         func = self._get_patched_func()
-        result = func("test", "test", scores, "es")
+        result, items = func("test", "test", scores, "es")
         assert any("Good" in line for line in result)
 
     @patch("app.services.feedback._describe_difference")
@@ -207,7 +207,7 @@ class TestGenerateFeedbackSync:
         ]
 
         func = self._get_patched_func()
-        result = func("test", "test", scores, "es")
+        result, items = func("test", "test", scores, "es")
         assert any("Decent" in line for line in result)
 
     @patch("app.services.feedback._describe_difference")
@@ -232,7 +232,7 @@ class TestGenerateFeedbackSync:
         ]
 
         func = self._get_patched_func()
-        result = func("test", "test", scores, "es")
+        result, items = func("test", "test", scores, "es")
         assert any("Keep practicing" in line for line in result)
 
     @patch("app.services.feedback._describe_difference")
@@ -256,7 +256,7 @@ class TestGenerateFeedbackSync:
         ]
 
         func = self._get_patched_func()
-        result = func("test", "test", scores, "es")
+        result, items = func("test", "test", scores, "es")
         assert any("Try voicing it." in line for line in result)
 
     @patch("app.services.feedback._describe_difference")
@@ -281,7 +281,7 @@ class TestGenerateFeedbackSync:
         ]
 
         func = self._get_patched_func()
-        result = func("test", "test", scores, "es")
+        result, items = func("test", "test", scores, "es")
         # Only one line should mention /d/ → /t/
         tip_lines = [l for l in result if "/d/" in l and "/t/" in l]
         assert len(tip_lines) == 1
@@ -303,7 +303,7 @@ class TestGenerateFeedbackSync:
         mock_describe.return_value = None
 
         func = self._get_patched_func()
-        result = func("test", "test", sample_gop_scores_with_silence, "es")
+        result, items = func("test", "test", sample_gop_scores_with_silence, "es")
         # Should have a line summarizing undetected phonemes
         silence_lines = [l for l in result if "not detected" in l]
         assert len(silence_lines) == 1

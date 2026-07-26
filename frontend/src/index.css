@@ -194,6 +194,57 @@ button.recording { background: var(--incorrect); border-color: var(--incorrect);
 .feedback-list { margin-top: 0.5rem; padding-left: 1.5rem; }
 .feedback-list li { margin: 0.25rem 0; }
 
+/* Structured feedback items */
+.feedback-item--phoneme {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-left: -1.5rem;
+}
+
+.phoneme-pair {
+  font-family: monospace;
+  font-size: 1.05rem;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.phoneme-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.phoneme-example {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.play-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
 /* Language selector */
 .language-selector {
   display: flex;

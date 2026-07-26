@@ -55,7 +55,7 @@ class TestEvaluateExercise:
         mock_gop.return_value = [
             {"phoneme": "o", "expected": "o", "score": 0.9, "is_correct": True},
         ]
-        mock_feedback.return_value = ["Great!"]
+        mock_feedback.return_value = (["Great!"], [])
 
         response = await client.post(
             "/api/exercises/evaluate",

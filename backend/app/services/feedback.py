@@ -13,6 +13,8 @@ import epitran
 import panphon
 import panphon.distance
 
+from app.data.phoneme_examples import get_example
+from app.models.schemas import FeedbackItem, PhonemeExampleRef
 from app.services.phoneme import EPITRAN_LANG
 
 log = logging.getLogger(__name__)
@@ -123,21 +125,38 @@ def _describe_difference(expected: str, actual: str) -> str | None:
     return f"Try making it {diffs[0][1]}."
 
 
+def _make_example_ref(phoneme: str) -> PhonemeExampleRef | None:
+    """Build a PhonemeExampleRef with TTS URL, or None if no English example."""
+    ex = get_example(phoneme)
+    if ex is None:
+        return None
+    return PhonemeExampleRef(
+        phoneme=phoneme,
+        example_word=ex.word,
+        highlight=ex.highlight,
+        description=ex.description,
+        tts_url=f"/api/tts?text={ex.word}&language=en",
+    )
+
+
 def _generate_feedback_sync(
     expected_text: str,
     transcript: str,
     phoneme_scores: list[dict],
     language: str,
-) -> list[str]:
+) -> tuple[list[str], list[FeedbackItem]]:
     """Generate feedback (synchronous)."""
     ft_table, dist = _get_panphon()
     epi = _get_epitran(language)
 
     feedback: list[str] = []
+    items: list[FeedbackItem] = []
 
     if not phoneme_scores:
-        feedback.append("No phonemes could be analyzed from the recording.")
-        return feedback
+        msg = "No phonemes could be analyzed from the recording."
+        feedback.append(msg)
+        items.append(FeedbackItem(type="summary", message=msg))
+        return feedback, items
 
     incorrect = [p for p in phoneme_scores if not p.get("is_correct", True)]
     correct_count = len(phoneme_scores) - len(incorrect)
@@ -145,14 +164,19 @@ def _generate_feedback_sync(
     # Overall summary
     pct = correct_count / len(phoneme_scores) * 100
     if pct == 100:
-        feedback.append("Excellent pronunciation! All phonemes matched.")
-        return feedback
+        msg = "Excellent pronunciation! All phonemes matched."
+        feedback.append(msg)
+        items.append(FeedbackItem(type="summary", message=msg))
+        return feedback, items
     elif pct >= 80:
-        feedback.append(f"Good pronunciation ({pct:.0f}% of phonemes correct). A few areas to refine:")
+        msg = f"Good pronunciation ({pct:.0f}% of phonemes correct). A few areas to refine:"
     elif pct >= 50:
-        feedback.append(f"Decent attempt ({pct:.0f}% correct). Focus on these sounds:")
+        msg = f"Decent attempt ({pct:.0f}% correct). Focus on these sounds:"
     else:
-        feedback.append(f"Keep practicing ({pct:.0f}% correct). Here are the key areas:")
+        msg = f"Keep practicing ({pct:.0f}% correct). Here are the key areas:"
+
+    feedback.append(msg)
+    items.append(FeedbackItem(type="summary", message=msg))
 
     # Group similar errors to avoid repetitive feedback
     seen_pairs: set[tuple[str, str]] = set()
@@ -178,19 +202,28 @@ def _generate_feedback_sync(
         # Get articulatory tip (uses panphon features internally)
         tip = _describe_difference(expected_ph, actual_ph)
         if tip is None:
-            # Same phoneme in panphon's view, or unknown segments
             line += " — very close, minor adjustment needed."
+            tip_text = "Very close, minor adjustment needed."
         else:
             line += f" — {tip}"
+            tip_text = tip
 
         feedback.append(line)
+        items.append(FeedbackItem(
+            type="phoneme_error",
+            message=f"/{expected_ph}/ → you said /{actual_ph}/ — {tip_text}",
+            expected_phoneme=expected_ph,
+            actual_phoneme=actual_ph,
+            expected_example=_make_example_ref(expected_ph),
+            actual_example=_make_example_ref(actual_ph),
+        ))
 
     # Summarize undetected phonemes
     if silence_phonemes:
         joined = "/, /".join(silence_phonemes)
-        feedback.append(
-            f"  /{joined}/ — not detected. Try speaking more clearly or closer to the mic."
-        )
+        msg = f"/{joined}/ — not detected. Try speaking more clearly or closer to the mic."
+        feedback.append(f"  {msg}")
+        items.append(FeedbackItem(type="silence_error", message=msg))
 
     # General tips based on overall distance (normalized)
     expected_ipa = epi.transliterate(expected_text)
@@ -199,12 +232,14 @@ def _generate_feedback_sync(
     overall_dist = dist.feature_edit_distance_div_maxlen(expected_ipa, transcript_ipa)
     if overall_dist > 0.5:
         feedback.append("")
-        feedback.append(
+        tip_msg = (
             "Tip: Try listening to a native speaker say this phrase and repeat slowly, "
             "syllable by syllable."
         )
+        feedback.append(tip_msg)
+        items.append(FeedbackItem(type="tip", message=tip_msg))
 
-    return feedback
+    return feedback, items
 
 
 async def generate_feedback(
@@ -212,7 +247,7 @@ async def generate_feedback(
     transcript: str,
     phoneme_scores: list[dict],
     language: str = "es",
-) -> list[str]:
+) -> tuple[list[str], list[FeedbackItem]]:
     """Generate human-readable pronunciation feedback.
 
     Uses epitran for grapheme-to-phoneme conversion and panphon for
@@ -228,7 +263,7 @@ async def generate_feedback(
         language: Language code (es, hr, de, zh).
 
     Returns:
-        List of feedback strings with actionable pronunciation tips.
+        Tuple of (feedback strings, structured FeedbackItem list).
     """
     loop = asyncio.get_running_loop()
     try:
@@ -237,4 +272,4 @@ async def generate_feedback(
         )
     except Exception:
         log.exception("Feedback generation failed")
-        return ["(Pronunciation feedback is temporarily unavailable.)"]
+        return ["(Pronunciation feedback is temporarily unavailable.)"], []

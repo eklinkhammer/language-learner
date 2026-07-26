@@ -3,8 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from app.config import settings
-from app.services.tts import synthesize
+from app.services.tts import VOICE_MAP, synthesize
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +16,10 @@ async def get_tts(
     language: str = Query(...),
 ):
     """Generate TTS audio for the given text and language."""
-    if language not in settings.supported_languages:
+    if language not in VOICE_MAP:
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported language: {language}. Supported: {settings.supported_languages}",
+            detail=f"Unsupported language: {language}. Supported: {list(VOICE_MAP)}",
         )
 
     try:

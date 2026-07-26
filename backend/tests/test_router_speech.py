@@ -25,7 +25,7 @@ class TestAnalyzeSpeech:
             {"phoneme": "l", "expected": "l", "score": 0.8, "is_correct": True},
             {"phoneme": "a", "expected": "a", "score": 0.85, "is_correct": True},
         ]
-        mock_feedback.return_value = ["Excellent pronunciation!"]
+        mock_feedback.return_value = (["Excellent pronunciation!"], [])
 
         response = await client.post(
             "/api/speech/analyze",
@@ -98,7 +98,7 @@ class TestAnalyzeSpeech:
         mock_gop.return_value = [
             {"phoneme": "o", "expected": "o", "score": 0.9, "is_correct": True},
         ]
-        mock_feedback.return_value = ["Good!"]
+        mock_feedback.return_value = (["Good!"], [])
 
         response = await client.post(
             "/api/speech/analyze",

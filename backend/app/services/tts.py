@@ -9,6 +9,7 @@ VOICE_MAP: dict[str, str] = {
     "hr": "hr-HR-GabrijelaNeural",
     "de": "de-DE-ConradNeural",
     "zh": "zh-CN-XiaoxiaoNeural",
+    "en": "en-US-GuyNeural",
 }
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "tts_cache"
