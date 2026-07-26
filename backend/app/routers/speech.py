@@ -34,7 +34,8 @@ async def analyze_speech(
             detail=f"Unsupported language: {language}. Supported: {settings.supported_languages}",
         )
 
-    if audio.content_type and audio.content_type not in ALLOWED_AUDIO_TYPES:
+    base_type = (audio.content_type or "").split(";")[0].strip()
+    if base_type and base_type not in ALLOWED_AUDIO_TYPES:
         raise HTTPException(status_code=415, detail=f"Unsupported audio type: {audio.content_type}")
 
     contents = await audio.read()

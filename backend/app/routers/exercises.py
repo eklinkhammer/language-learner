@@ -77,7 +77,8 @@ async def evaluate_exercise(
     if exercise is None:
         raise HTTPException(status_code=404, detail=f"Exercise '{exercise_id}' not found")
 
-    if audio.content_type and audio.content_type not in ALLOWED_AUDIO_TYPES:
+    base_type = (audio.content_type or "").split(";")[0].strip()
+    if base_type and base_type not in ALLOWED_AUDIO_TYPES:
         raise HTTPException(status_code=415, detail=f"Unsupported audio type: {audio.content_type}")
 
     contents = await audio.read()
