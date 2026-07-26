@@ -2,24 +2,38 @@ import { useState } from "react";
 import { chat } from "../api/client";
 import type { ChatMessage } from "../types";
 
-export function ConversationView() {
+const PLACEHOLDERS: Record<string, string> = {
+  es: "Type in Spanish...",
+  hr: "Type in Croatian...",
+  de: "Type in German...",
+  zh: "Type in Chinese...",
+};
+
+interface Props {
+  language: string;
+}
+
+export function ConversationView({ language }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [language] = useState("es");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
-  const send = async () => {
-    if (!input.trim()) return;
+  const send = async (text?: string) => {
+    const msg = text ?? input;
+    if (!msg.trim()) return;
 
-    const userMsg: ChatMessage = { role: "user", content: input };
+    const userMsg: ChatMessage = { role: "user", content: msg };
     const updated = [...messages, userMsg];
     setMessages(updated);
     setInput("");
+    setSuggestions([]);
     setLoading(true);
 
     try {
-      const res = await chat(input, language, messages);
+      const res = await chat(msg, language, messages);
       setMessages([...updated, { role: "assistant", content: res.reply }]);
+      setSuggestions(res.suggestions ?? []);
     } catch {
       setMessages([
         ...updated,
@@ -43,14 +57,28 @@ export function ConversationView() {
         {loading && <div className="message assistant">Tutor is typing...</div>}
       </div>
 
+      {suggestions.length > 0 && (
+        <div className="suggestions">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              className="suggestion-chip"
+              onClick={() => send(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="input-row">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Type in Spanish..."
+          placeholder={PLACEHOLDERS[language] ?? "Type a message..."}
         />
-        <button onClick={send} disabled={loading}>
+        <button onClick={() => send()} disabled={loading}>
           Send
         </button>
       </div>

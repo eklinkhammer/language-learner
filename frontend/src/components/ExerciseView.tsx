@@ -4,36 +4,58 @@ import { AudioRecorder } from "./AudioRecorder";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import type { Exercise, SpeechAnalysisResponse } from "../types";
 
-export function ExerciseView() {
+type Difficulty = "" | "beginner" | "intermediate" | "advanced";
+
+const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
+  { value: "", label: "All" },
+  { value: "beginner", label: "Beginner" },
+  { value: "intermediate", label: "Intermediate" },
+  { value: "advanced", label: "Advanced" },
+];
+
+interface Props {
+  language: string;
+}
+
+export function ExerciseView({ language }: Props) {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [current, setCurrent] = useState<Exercise | null>(null);
   const [analysis, setAnalysis] = useState<SpeechAnalysisResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>("");
 
-  const [error, setError] = useState<string | null>(null);
+  const [fetchLoading, setFetchLoading] = useState(true);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [evalError, setEvalError] = useState<string | null>(null);
 
   useEffect(() => {
-    getExercises("es")
+    setFetchLoading(true);
+    setFetchError(null);
+    setCurrent(null);
+    setAnalysis(null);
+    getExercises(language, difficulty || undefined)
       .then((res) => {
         setExercises(res.exercises);
         if (res.exercises.length > 0) setCurrent(res.exercises[0]);
       })
       .catch(() => {
-        setError("Failed to load exercises. Is the backend running?");
-      });
-  }, []);
+        setFetchError("Failed to load exercises. Is the backend running?");
+      })
+      .finally(() => setFetchLoading(false));
+  }, [language, difficulty]);
 
   const handleRecording = async (blob: Blob) => {
     if (!current) return;
-    setLoading(true);
+    setEvalLoading(true);
+    setEvalError(null);
     setAnalysis(null);
     try {
       const res = await evaluateExercise(blob, current.id, current.language);
       setAnalysis(res.analysis);
     } catch {
-      setAnalysis(null);
+      setEvalError("Pronunciation analysis failed. Please try again.");
     } finally {
-      setLoading(false);
+      setEvalLoading(false);
     }
   };
 
@@ -41,33 +63,62 @@ export function ExerciseView() {
     <div className="exercise-view">
       <h2>Pronunciation Drills</h2>
 
-      {error && <p className="error">{error}</p>}
-
-      <div className="exercise-list">
-        {exercises.map((ex) => (
+      <div className="difficulty-filter">
+        {DIFFICULTY_OPTIONS.map((opt) => (
           <button
-            key={ex.id}
-            className={current?.id === ex.id ? "active" : ""}
-            onClick={() => {
-              setCurrent(ex);
-              setAnalysis(null);
-            }}
+            key={opt.value}
+            className={difficulty === opt.value ? "active" : ""}
+            onClick={() => setDifficulty(opt.value)}
           >
-            {ex.phrase}
+            {opt.label}
           </button>
         ))}
       </div>
 
-      {current && (
-        <div className="current-exercise">
-          <p className="phrase">{current.phrase}</p>
-          <p className="ipa">/{current.ipa}/</p>
-          <p className="translation">{current.translation}</p>
+      {fetchError && <p className="error">{fetchError}</p>}
 
-          <AudioRecorder onRecordingComplete={handleRecording} />
-          {loading && <p>Analyzing...</p>}
-          <PronunciationFeedback analysis={analysis} />
+      {fetchLoading ? (
+        <div className="loading-indicator">
+          <div className="spinner" />
+          <p className="loading-text">Loading exercises...</p>
         </div>
+      ) : (
+        <>
+          <div className="exercise-list">
+            {exercises.map((ex) => (
+              <button
+                key={ex.id}
+                className={current?.id === ex.id ? "active" : ""}
+                onClick={() => {
+                  setCurrent(ex);
+                  setAnalysis(null);
+                  setEvalError(null);
+                }}
+              >
+                {ex.phrase}
+              </button>
+            ))}
+          </div>
+
+          {current && (
+            <div className="current-exercise">
+              <p className="phrase">{current.phrase}</p>
+              <p className="ipa">/{current.ipa}/</p>
+              <p className="translation">{current.translation}</p>
+
+              <AudioRecorder onRecordingComplete={handleRecording} />
+
+              {evalLoading && (
+                <div className="loading-indicator">
+                  <div className="spinner" />
+                  <p className="loading-text">Analyzing pronunciation...</p>
+                </div>
+              )}
+              {evalError && <p className="error">{evalError}</p>}
+              <PronunciationFeedback analysis={analysis} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
