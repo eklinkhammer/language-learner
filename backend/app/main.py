@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import speech, tutor, exercises
+from app.routers import speech, tutor, exercises, tts
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(speech.router, prefix="/api/speech", tags=["speech"])
 app.include_router(tutor.router, prefix="/api/tutor", tags=["tutor"])
 app.include_router(exercises.router, prefix="/api/exercises", tags=["exercises"])
+app.include_router(tts.router, prefix="/api/tts", tags=["tts"])
 
 
 @app.get("/api/health")

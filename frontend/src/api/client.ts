@@ -8,6 +8,11 @@ import type {
 
 const BASE = "/api";
 
+export function getTtsUrl(text: string, language: string): string {
+  const params = new URLSearchParams({ text, language });
+  return `${BASE}/tts?${params.toString()}`;
+}
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",

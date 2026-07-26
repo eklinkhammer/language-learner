@@ -14,6 +14,7 @@ dependencies = [
     "panphon>=0.21",
     "pydantic-settings>=2.0",
     "phonemizer>=3.3",
+    "edge-tts>=6.1",
 ]
 
 [project.optional-dependencies]

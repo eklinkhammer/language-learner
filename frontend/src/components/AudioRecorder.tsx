@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAudioRecorder } from "../hooks/useAudioRecorder";
 
 interface Props {
@@ -14,6 +14,7 @@ function AudioPreview({ blob }: { blob: Blob }) {
 export function AudioRecorder({ onRecordingComplete }: Props) {
   const { isRecording, audioBlob, error, startRecording, stopRecording, clearRecording } =
     useAudioRecorder();
+  const [submitted, setSubmitted] = useState(false);
 
   const handleStop = () => {
     stopRecording();
@@ -22,8 +23,13 @@ export function AudioRecorder({ onRecordingComplete }: Props) {
   const handleSubmit = () => {
     if (audioBlob) {
       onRecordingComplete(audioBlob);
-      clearRecording();
+      setSubmitted(true);
     }
+  };
+
+  const handleRecordAgain = () => {
+    setSubmitted(false);
+    clearRecording();
   };
 
   return (
@@ -31,7 +37,7 @@ export function AudioRecorder({ onRecordingComplete }: Props) {
       {error && <p className="error">{error}</p>}
 
       <div className="controls">
-        {!isRecording && !audioBlob && (
+        {!isRecording && !audioBlob && !submitted && (
           <button onClick={startRecording}>Record</button>
         )}
         {isRecording && (
@@ -39,12 +45,15 @@ export function AudioRecorder({ onRecordingComplete }: Props) {
             Stop
           </button>
         )}
-        {audioBlob && (
+        {audioBlob && !submitted && (
           <>
             <AudioPreview blob={audioBlob} />
             <button onClick={handleSubmit}>Submit</button>
             <button onClick={clearRecording}>Discard</button>
           </>
+        )}
+        {submitted && (
+          <button onClick={handleRecordAgain}>Record again</button>
         )}
       </div>
     </div>

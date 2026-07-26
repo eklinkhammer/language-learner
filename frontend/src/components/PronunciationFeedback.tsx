@@ -1,16 +1,47 @@
+import { useEffect, useMemo } from "react";
 import type { SpeechAnalysisResponse } from "../types";
 
 interface Props {
   analysis: SpeechAnalysisResponse | null;
+  userAudioBlob?: Blob | null;
+  referenceAudioUrl?: string | null;
 }
 
-export function PronunciationFeedback({ analysis }: Props) {
+export function PronunciationFeedback({ analysis, userAudioBlob, referenceAudioUrl }: Props) {
+  const userAudioUrl = useMemo(
+    () => (userAudioBlob ? URL.createObjectURL(userAudioBlob) : null),
+    [userAudioBlob],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (userAudioUrl) URL.revokeObjectURL(userAudioUrl);
+    };
+  }, [userAudioUrl]);
+
   if (!analysis) return null;
 
   const scorePercent = Math.round(analysis.overall_score * 100);
 
   return (
     <div className="pronunciation-feedback">
+      {(referenceAudioUrl || userAudioUrl) && (
+        <div className="audio-comparison">
+          {referenceAudioUrl && (
+            <div className="audio-player">
+              <label>Reference</label>
+              <audio src={referenceAudioUrl} controls />
+            </div>
+          )}
+          {userAudioUrl && (
+            <div className="audio-player">
+              <label>Your Recording</label>
+              <audio src={userAudioUrl} controls />
+            </div>
+          )}
+        </div>
+      )}
+
       <h3>
         Score: {scorePercent}%
       </h3>

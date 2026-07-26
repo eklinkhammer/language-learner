@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getExercises, evaluateExercise } from "../api/client";
+import { getExercises, evaluateExercise, getTtsUrl } from "../api/client";
 import { AudioRecorder } from "./AudioRecorder";
 import { PronunciationFeedback } from "./PronunciationFeedback";
 import type { Exercise, SpeechAnalysisResponse } from "../types";
@@ -21,6 +21,7 @@ export function ExerciseView({ language }: Props) {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [current, setCurrent] = useState<Exercise | null>(null);
   const [analysis, setAnalysis] = useState<SpeechAnalysisResponse | null>(null);
+  const [userAudioBlob, setUserAudioBlob] = useState<Blob | null>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>("");
 
   const [fetchLoading, setFetchLoading] = useState(true);
@@ -46,6 +47,7 @@ export function ExerciseView({ language }: Props) {
 
   const handleRecording = async (blob: Blob) => {
     if (!current) return;
+    setUserAudioBlob(blob);
     setEvalLoading(true);
     setEvalError(null);
     setAnalysis(null);
@@ -92,6 +94,7 @@ export function ExerciseView({ language }: Props) {
                 onClick={() => {
                   setCurrent(ex);
                   setAnalysis(null);
+                  setUserAudioBlob(null);
                   setEvalError(null);
                 }}
               >
@@ -106,7 +109,7 @@ export function ExerciseView({ language }: Props) {
               <p className="ipa">/{current.ipa}/</p>
               <p className="translation">{current.translation}</p>
 
-              <AudioRecorder onRecordingComplete={handleRecording} />
+              <AudioRecorder key={current.id} onRecordingComplete={handleRecording} />
 
               {evalLoading && (
                 <div className="loading-indicator">
@@ -115,7 +118,11 @@ export function ExerciseView({ language }: Props) {
                 </div>
               )}
               {evalError && <p className="error">{evalError}</p>}
-              <PronunciationFeedback analysis={analysis} />
+              <PronunciationFeedback
+                analysis={analysis}
+                userAudioBlob={userAudioBlob}
+                referenceAudioUrl={getTtsUrl(current.phrase, current.language)}
+              />
             </div>
           )}
         </>

@@ -146,6 +146,30 @@ button.recording { background: var(--incorrect); border-color: var(--incorrect);
 .controls { display: flex; gap: 0.5rem; align-items: center; justify-content: center; }
 .error { color: var(--incorrect); }
 
+/* Audio comparison */
+.audio-comparison {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.audio-player {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.audio-player label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.audio-player audio {
+  width: 100%;
+}
+
 /* Pronunciation feedback */
 .pronunciation-feedback {
   margin-top: 1rem;
