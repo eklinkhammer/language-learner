@@ -24,8 +24,24 @@ function StructuredFeedbackItem({ item }: { item: FeedbackItem }) {
     return <li className="feedback-item">{item.message}</li>;
   }
 
+  if (item.type === "word_breakdown") {
+    return (
+      <li className="feedback-item feedback-item--breakdown">
+        <span className="word-breakdown">{item.message}</span>
+      </li>
+    );
+  }
+
   return (
     <li className="feedback-item feedback-item--phoneme">
+      {item.source_word && (
+        <span className="source-word">
+          &ldquo;{item.source_word}&rdquo;
+          {item.source_letter && (
+            <span className="source-letter"> (letter &ldquo;{item.source_letter}&rdquo;)</span>
+          )}
+        </span>
+      )}
       <span className="phoneme-pair">
         /{item.expected_phoneme}/ → you said /{item.actual_phoneme}/
       </span>

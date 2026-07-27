@@ -14,12 +14,14 @@ export interface PhonemeExampleRef {
 }
 
 export interface FeedbackItem {
-  type: "summary" | "phoneme_error" | "silence_error" | "tip";
+  type: "summary" | "phoneme_error" | "silence_error" | "tip" | "word_breakdown";
   message: string;
   expected_phoneme?: string;
   actual_phoneme?: string;
   expected_example?: PhonemeExampleRef;
   actual_example?: PhonemeExampleRef;
+  source_word?: string;
+  source_letter?: string;
 }
 
 export interface SpeechAnalysisResponse {

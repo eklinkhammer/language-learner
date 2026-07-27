@@ -13,7 +13,7 @@ import epitran
 import panphon
 import panphon.distance
 
-from app.data.phoneme_examples import get_example
+from app.data.phoneme_examples import PHONEME_EXAMPLES, get_example
 from app.models.schemas import FeedbackItem, PhonemeExampleRef
 from app.services.phoneme import EPITRAN_LANG
 
@@ -139,6 +139,96 @@ def _make_example_ref(phoneme: str) -> PhonemeExampleRef | None:
     )
 
 
+def _map_phonemes_to_words(
+    expected_text: str,
+    phoneme_scores: list[dict],
+    epi: epitran.Epitran,
+) -> dict[int, tuple[str, str]]:
+    """Map each phoneme_score index to (source_word, grapheme).
+
+    Uses epitran's word_to_tuples to get grapheme→phoneme mappings, then walks
+    phoneme_scores in order to match each expected phoneme to its source word
+    and the letter(s) that produce it.
+
+    Returns:
+        {score_index: (word, grapheme)} mapping.
+    """
+    words = expected_text.split()
+    if not words:
+        return {}
+
+    # Build flat list of (phoneme_char, word, grapheme) from word_to_tuples
+    ipa_entries: list[tuple[str, str, str]] = []
+    for word in words:
+        tuples = epi.word_to_tuples(word)
+        for tup in tuples:
+            # tup format: (category, ?, grapheme, ipa_string, features_list)
+            grapheme = tup[2]
+            ipa_str = tup[3]
+            # Each char in ipa_str maps back to this grapheme
+            for ch in ipa_str:
+                ipa_entries.append((ch, word, grapheme))
+
+    # Walk phoneme_scores in order, matching each expected phoneme
+    result: dict[int, tuple[str, str]] = {}
+    ipa_pos = 0
+    for score_idx, score in enumerate(phoneme_scores):
+        expected_ph = score.get("expected", "")
+        if not expected_ph:
+            continue
+        # Search forward for a matching phoneme char
+        search_pos = ipa_pos
+        while search_pos < len(ipa_entries):
+            if ipa_entries[search_pos][0] == expected_ph:
+                result[score_idx] = (ipa_entries[search_pos][1], ipa_entries[search_pos][2])
+                ipa_pos = search_pos + 1
+                break
+            search_pos += 1
+
+    return result
+
+
+def _build_word_breakdown(word: str, epi: epitran.Epitran) -> str:
+    """Build a phonetic breakdown sentence for a word.
+
+    Uses grapheme-phoneme mapping to show letters and their sounds.
+    E.g. for "fish": 'f as in "fall", i as in "dish", sh as in "shy" for "fish"'
+    """
+    tuples = epi.word_to_tuples(word)
+    parts: list[str] = []
+
+    for tup in tuples:
+        grapheme = tup[2]
+        ipa_str = tup[3]
+
+        # Try matching the full IPA string as a multi-char phoneme (e.g. tʃ)
+        if ipa_str in PHONEME_EXAMPLES:
+            ex = PHONEME_EXAMPLES[ipa_str]
+            if ex is not None:
+                parts.append(f'{grapheme} as in "{ex.word}"')
+            else:
+                parts.append(grapheme)
+        elif len(ipa_str) == 1:
+            # Single phoneme
+            ex = get_example(ipa_str)
+            if ex is not None:
+                parts.append(f'{grapheme} as in "{ex.word}"')
+            else:
+                parts.append(grapheme)
+        else:
+            # Multi-phoneme grapheme (e.g. "ue" → "we"): list each phoneme
+            sub_parts = []
+            for ch in ipa_str:
+                ex = get_example(ch)
+                if ex is not None:
+                    sub_parts.append(f'{ch} as in "{ex.word}"')
+                else:
+                    sub_parts.append(ch)
+            parts.append(f'{grapheme} ({", ".join(sub_parts)})')
+
+    return ", ".join(parts) + f' for "{word}"'
+
+
 def _generate_feedback_sync(
     expected_text: str,
     transcript: str,
@@ -151,6 +241,9 @@ def _generate_feedback_sync(
 
     feedback: list[str] = []
     items: list[FeedbackItem] = []
+
+    # Map each phoneme score to its source word
+    phoneme_word_map = _map_phonemes_to_words(expected_text, phoneme_scores, epi)
 
     if not phoneme_scores:
         msg = "No phonemes could be analyzed from the recording."
@@ -181,13 +274,26 @@ def _generate_feedback_sync(
     # Group similar errors to avoid repetitive feedback
     seen_pairs: set[tuple[str, str]] = set()
     silence_phonemes: list[str] = []
+    # Track which words have errors (for word_breakdown generation)
+    error_words: set[str] = set()
 
-    for p in incorrect:
+    # Build index→score mapping for incorrect phonemes
+    incorrect_indices = [
+        i for i, p in enumerate(phoneme_scores) if not p.get("is_correct", True)
+    ]
+
+    for idx in incorrect_indices:
+        p = phoneme_scores[idx]
         expected_ph = p.get("expected", "")
         actual_ph = p.get("phoneme", "")
+        word_and_letter = phoneme_word_map.get(idx)
+        source_word = word_and_letter[0] if word_and_letter else None
+        source_letter = word_and_letter[1] if word_and_letter else None
 
         pair = (expected_ph, actual_ph)
         if pair in seen_pairs:
+            if source_word:
+                error_words.add(source_word)
             continue
         seen_pairs.add(pair)
 
@@ -196,8 +302,16 @@ def _generate_feedback_sync(
             silence_phonemes.append(expected_ph)
             continue
 
+        if source_word:
+            error_words.add(source_word)
+
         # Build feedback line
-        line = f"  /{expected_ph}/ → you said /{actual_ph}/"
+        if source_word and source_letter:
+            line = f'  In "{source_word}" (letter "{source_letter}"): /{expected_ph}/ → you said /{actual_ph}/'
+        elif source_word:
+            line = f'  In "{source_word}": /{expected_ph}/ → you said /{actual_ph}/'
+        else:
+            line = f"  /{expected_ph}/ → you said /{actual_ph}/"
 
         # Get articulatory tip (uses panphon features internally)
         tip = _describe_difference(expected_ph, actual_ph)
@@ -216,6 +330,8 @@ def _generate_feedback_sync(
             actual_phoneme=actual_ph,
             expected_example=_make_example_ref(expected_ph),
             actual_example=_make_example_ref(actual_ph),
+            source_word=source_word,
+            source_letter=source_letter,
         ))
 
     # Summarize undetected phonemes
@@ -224,6 +340,16 @@ def _generate_feedback_sync(
         msg = f"/{joined}/ — not detected. Try speaking more clearly or closer to the mic."
         feedback.append(f"  {msg}")
         items.append(FeedbackItem(type="silence_error", message=msg))
+
+    # Word breakdown for each word that had errors
+    for word in expected_text.split():
+        if word in error_words:
+            breakdown = _build_word_breakdown(word, epi)
+            items.append(FeedbackItem(
+                type="word_breakdown",
+                message=breakdown,
+                source_word=word,
+            ))
 
     # General tips based on overall distance (normalized)
     expected_ipa = epi.transliterate(expected_text)

@@ -19,12 +19,14 @@ class PhonemeExampleRef(BaseModel):
 
 
 class FeedbackItem(BaseModel):
-    type: Literal["summary", "phoneme_error", "silence_error", "tip"]
+    type: Literal["summary", "phoneme_error", "silence_error", "tip", "word_breakdown"]
     message: str
     expected_phoneme: str | None = None
     actual_phoneme: str | None = None
     expected_example: PhonemeExampleRef | None = None
     actual_example: PhonemeExampleRef | None = None
+    source_word: str | None = None
+    source_letter: str | None = None
 
 
 class SpeechAnalysisResponse(BaseModel):
