@@ -8,6 +8,7 @@ tongue further forward").
 import asyncio
 import logging
 from functools import lru_cache
+from urllib.parse import quote
 
 import epitran
 import panphon
@@ -135,7 +136,7 @@ def _make_example_ref(phoneme: str) -> PhonemeExampleRef | None:
         example_word=ex.word,
         highlight=ex.highlight,
         description=ex.description,
-        tts_url=f"/api/tts?text={ex.word}&language=en",
+        tts_url=f"/api/tts?text={quote(ex.word)}&language=en",
     )
 
 
@@ -200,6 +201,10 @@ def _build_word_breakdown(word: str, epi: epitran.Epitran) -> str:
     for tup in tuples:
         grapheme = tup[2]
         ipa_str = tup[3]
+
+        # Skip entries with no phonemic content (e.g. combining accents)
+        if not ipa_str:
+            continue
 
         # Try matching the full IPA string as a multi-char phoneme (e.g. tʃ)
         if ipa_str in PHONEME_EXAMPLES:
@@ -316,20 +321,34 @@ def _generate_feedback_sync(
         # Get articulatory tip (uses panphon features internally)
         tip = _describe_difference(expected_ph, actual_ph)
         if tip is None:
-            line += " — very close, minor adjustment needed."
             tip_text = "Very close, minor adjustment needed."
         else:
-            line += f" — {tip}"
             tip_text = tip
+
+        # Build "you said X as in ..., you want Y as in ..." explanation
+        expected_ref = _make_example_ref(expected_ph)
+        actual_ref = _make_example_ref(actual_ph)
+        example_parts: list[str] = []
+        if actual_ref:
+            example_parts.append(
+                f'you said {actual_ph} as in "{actual_ref.example_word}"'
+            )
+        if expected_ref:
+            example_parts.append(
+                f'you want {expected_ph} as in "{expected_ref.example_word}"'
+            )
+        example_hint = f" ({', '.join(example_parts)})" if example_parts else ""
+
+        line += f" — {tip_text}{example_hint}"
 
         feedback.append(line)
         items.append(FeedbackItem(
             type="phoneme_error",
-            message=f"/{expected_ph}/ → you said /{actual_ph}/ — {tip_text}",
+            message=f"/{expected_ph}/ → you said /{actual_ph}/ — {tip_text}{example_hint}",
             expected_phoneme=expected_ph,
             actual_phoneme=actual_ph,
-            expected_example=_make_example_ref(expected_ph),
-            actual_example=_make_example_ref(actual_ph),
+            expected_example=expected_ref,
+            actual_example=actual_ref,
             source_word=source_word,
             source_letter=source_letter,
         ))

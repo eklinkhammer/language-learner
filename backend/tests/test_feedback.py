@@ -1,6 +1,7 @@
 """Tests for app.services.feedback — pronunciation feedback generation."""
 
 from unittest.mock import MagicMock, patch
+from urllib.parse import quote
 
 import pytest
 
@@ -308,3 +309,154 @@ class TestGenerateFeedbackSync:
         silence_lines = [l for l in result if "not detected" in l]
         assert len(silence_lines) == 1
         assert "/b/" in silence_lines[0] and "/c/" in silence_lines[0]
+
+    @patch("app.services.feedback._describe_difference")
+    @patch("app.services.feedback._get_epitran")
+    @patch("app.services.feedback._get_panphon")
+    def test_example_hint_present_for_known_phonemes(
+        self, mock_panphon, mock_epitran, mock_describe
+    ):
+        """When both expected and actual phonemes have examples, hint is included."""
+        mock_epi = MagicMock()
+        mock_epi.transliterate.return_value = "test"
+        mock_epi.word_to_tuples.return_value = []
+        mock_epitran.return_value = mock_epi
+
+        mock_ft = MagicMock()
+        mock_dist = MagicMock()
+        mock_dist.feature_edit_distance_div_maxlen.return_value = 0.1
+        mock_panphon.return_value = (mock_ft, mock_dist)
+        mock_describe.return_value = "Tip."
+
+        # "d" and "t" both have English examples in PHONEME_EXAMPLES
+        scores = [
+            {"phoneme": "t", "expected": "d", "score": 0.1, "is_correct": False},
+            {"phoneme": "a", "expected": "a", "score": 0.9, "is_correct": True},
+        ]
+
+        func = self._get_patched_func()
+        result, items = func("test", "test", scores, "es")
+
+        # Check feedback lines contain the "as in" example hints
+        error_lines = [l for l in result if "you said" in l and "as in" in l]
+        assert len(error_lines) == 1
+        assert 'you said t as in "top"' in error_lines[0]
+        assert 'you want d as in "dog"' in error_lines[0]
+
+        # Check structured FeedbackItem message
+        error_items = [it for it in items if it.type == "phoneme_error"]
+        assert len(error_items) == 1
+        assert 'you said t as in "top"' in error_items[0].message
+        assert 'you want d as in "dog"' in error_items[0].message
+
+    @patch("app.services.feedback._describe_difference")
+    @patch("app.services.feedback._get_epitran")
+    @patch("app.services.feedback._get_panphon")
+    def test_example_hint_absent_for_unknown_phonemes(
+        self, mock_panphon, mock_epitran, mock_describe
+    ):
+        """When neither phoneme has an example, the parenthetical hint is absent."""
+        mock_epi = MagicMock()
+        mock_epi.transliterate.return_value = "test"
+        mock_epi.word_to_tuples.return_value = []
+        mock_epitran.return_value = mock_epi
+
+        mock_ft = MagicMock()
+        mock_dist = MagicMock()
+        mock_dist.feature_edit_distance_div_maxlen.return_value = 0.1
+        mock_panphon.return_value = (mock_ft, mock_dist)
+        mock_describe.return_value = "Tip."
+
+        # "ɾ" and "β" both map to None in PHONEME_EXAMPLES
+        scores = [
+            {"phoneme": "β", "expected": "ɾ", "score": 0.1, "is_correct": False},
+            {"phoneme": "a", "expected": "a", "score": 0.9, "is_correct": True},
+        ]
+
+        func = self._get_patched_func()
+        result, items = func("test", "test", scores, "es")
+
+        # No "as in" hint should appear
+        error_lines = [l for l in result if "/ɾ/" in l]
+        assert len(error_lines) == 1
+        assert "as in" not in error_lines[0]
+
+        error_items = [it for it in items if it.type == "phoneme_error"]
+        assert len(error_items) == 1
+        assert "as in" not in error_items[0].message
+
+
+# ===== _make_example_ref() =====
+
+
+class TestMakeExampleRef:
+    """Tests for _make_example_ref helper."""
+
+    def test_known_phoneme_returns_ref(self):
+        """Known phoneme (e.g. 'd') returns a PhonemeExampleRef with correct fields."""
+        from app.services.feedback import _make_example_ref
+
+        ref = _make_example_ref("d")
+        assert ref is not None
+        assert ref.phoneme == "d"
+        assert ref.example_word == "dog"
+        assert ref.highlight == "d"
+        assert ref.description == 'like the "d" in "dog"'
+        assert ref.tts_url == f"/api/tts?text={quote('dog')}&language=en"
+
+    def test_unknown_phoneme_returns_none(self):
+        """Unknown phoneme (e.g. 'ɾ') returns None."""
+        from app.services.feedback import _make_example_ref
+
+        ref = _make_example_ref("ɾ")
+        assert ref is None
+
+
+# ===== _build_word_breakdown() =====
+
+
+class TestBuildWordBreakdown:
+    """Tests for _build_word_breakdown helper."""
+
+    @patch("app.services.feedback._get_epitran")
+    @patch("app.services.feedback._get_panphon")
+    def test_normal_word_produces_breakdown(self, mock_panphon, mock_epitran):
+        """Normal word produces expected breakdown string."""
+        from app.services.feedback import _build_word_breakdown
+
+        mock_epi = MagicMock()
+        # Simulate word_to_tuples for "bat" → b, a, t
+        mock_epi.word_to_tuples.return_value = [
+            ("L", "L", "b", "b", []),
+            ("L", "L", "a", "a", []),
+            ("L", "L", "t", "t", []),
+        ]
+
+        result = _build_word_breakdown("bat", mock_epi)
+
+        assert 'b as in "bat"' in result
+        assert 'a as in "father"' in result
+        assert 't as in "top"' in result
+        assert result.endswith('for "bat"')
+
+    @patch("app.services.feedback._get_epitran")
+    @patch("app.services.feedback._get_panphon")
+    def test_empty_ipa_entries_skipped(self, mock_panphon, mock_epitran):
+        """Entries with empty ipa_str (combining accents) are skipped."""
+        from app.services.feedback import _build_word_breakdown
+
+        mock_epi = MagicMock()
+        # Second entry has empty ipa_str (e.g. combining accent)
+        mock_epi.word_to_tuples.return_value = [
+            ("L", "L", "b", "b", []),
+            ("L", "L", "\u0301", "", []),   # combining acute accent, empty IPA
+            ("L", "L", "a", "a", []),
+        ]
+
+        result = _build_word_breakdown("ba", mock_epi)
+
+        # Should only have two parts (b and a), accent is skipped
+        assert 'b as in "bat"' in result
+        assert 'a as in "father"' in result
+        assert "\u0301" not in result
+        assert result.endswith('for "ba"')
